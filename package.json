@@ -1,0 +1,11 @@
+{
+  "name": "freee-api-skill",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "generate": "bun run scripts/generate_references.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

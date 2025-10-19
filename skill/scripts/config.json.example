@@ -1,0 +1,10 @@
+{
+  "client_id": "your_freee_client_id_here",
+  "client_secret": "your_freee_client_secret_here",
+  "callback_port": 8080,
+  "api_url": "https://api.freee.co.jp",
+  "authorization_endpoint": "https://accounts.secure.freee.co.jp/public_api/authorize",
+  "token_endpoint": "https://accounts.secure.freee.co.jp/public_api/token",
+  "scope": "read write",
+  "auth_timeout_seconds": 300
+}

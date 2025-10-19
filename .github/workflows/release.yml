@@ -1,0 +1,20 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - name: Package skill
+        run: |
+          cd skill
+          zip -r ../freee-skill.zip .
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: freee-skill.zip
