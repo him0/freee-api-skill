@@ -2,18 +2,23 @@
 
 > **注意**: このスキルは現在ベータ版です。
 
-freee の API を利用して、会計や人事労務のデータを操作するための Claude スキルです。
+freee の API を MCP (Model Context Protocol) 経由で利用するための Claude スキルです。
 
-## 既知の問題
+## 概要
 
-### Claude Code skill での制限
+このスキルは、[@him0/freee-mcp](https://www.npmjs.com/package/@him0/freee-mcp) と組み合わせて使用することで、Claude Desktop から freee API を直接操作できるようにします。
 
-現在、Claude Code の skill 機能では以下の制限により、このスキルは使用できません：
+**このスキルが提供するもの**:
+- 62個の freee API リファレンスドキュメント（パラメータ、リクエストボディ、レスポンス情報を含む）
+- freee-mcp の使い方ガイド
+- API 呼び出しの具体例
 
-- **環境変数の受け渡しができない** - freee API の認証に必要な環境変数（アクセストークンなど）を skill に渡す方法がありません
-- **ブラウザを開けない** - OAuth認証フローでブラウザを開くことができません
+**利用するには**:
+1. ユーザー自身の環境で `npx @him0/freee-mcp configure` を実行（OAuth認証）
+2. このスキルをプラグインとしてインストール（自動的に freee-mcp が MCP サーバーとして登録されます）
+3. このスキルのリファレンスを参照しながら API を呼び出し
 
-これらの問題が解決されるまで、Claude Code の skill としては利用できません。
+詳細は `skill/SKILL.md` を参照してください。
 
 ## 対応する freee API
 
