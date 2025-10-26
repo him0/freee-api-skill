@@ -1,6 +1,6 @@
 {
-  "name": "freee-api-skill",
-  "version": "1.0.0",
+  "name": "freee-api-skills",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "generate": "bun run scripts/generate_references.ts"

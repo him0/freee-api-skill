@@ -16,11 +16,62 @@ const OUTPUT_DIR = join(PROJECT_ROOT, "skill", "references");
 const MAPPINGS_FILE = join(OPENAPI_DIR, "tag-mappings.json");
 
 // Type definitions
+interface Parameter {
+  name: string;
+  in: string;
+  description?: string;
+  required?: boolean;
+  schema?: SchemaObject;
+}
+
+interface RequestBody {
+  content?: {
+    [mediaType: string]: {
+      schema?: SchemaObject;
+    };
+  };
+  required?: boolean;
+}
+
+interface Response {
+  description?: string;
+  content?: {
+    [mediaType: string]: {
+      schema?: SchemaObject;
+    };
+  };
+}
+
+interface SchemaObject {
+  $ref?: string;
+  type?: string;
+  format?: string;
+  description?: string;
+  example?: any;
+  enum?: any[];
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;
+  required?: string[];
+  properties?: {
+    [key: string]: SchemaObject;
+  };
+  items?: SchemaObject;
+  allOf?: SchemaObject[];
+  oneOf?: SchemaObject[];
+  anyOf?: SchemaObject[];
+}
+
 interface Operation {
   method: string;
   operationId?: string;
   summary?: string;
   description?: string;
+  parameters?: Parameter[];
+  requestBody?: RequestBody;
+  responses?: {
+    [statusCode: string]: Response;
+  };
 }
 
 interface PathData {
@@ -43,7 +94,17 @@ interface OpenAPISchema {
         operationId?: string;
         summary?: string;
         description?: string;
+        parameters?: Parameter[];
+        requestBody?: RequestBody;
+        responses?: {
+          [statusCode: string]: Response;
+        };
       };
+    };
+  };
+  components?: {
+    schemas?: {
+      [key: string]: SchemaObject;
     };
   };
 }
@@ -53,6 +114,276 @@ interface OpenAPISchema {
  */
 function stripHtmlTags(text: string): string {
   return text.replace(/<[^>]*>/g, "");
+}
+
+/**
+ * Resolve $ref in schema
+ */
+function resolveRef(
+  schema: OpenAPISchema,
+  ref: string
+): SchemaObject | undefined {
+  // $ref format: "#/components/schemas/SchemaName"
+  const parts = ref.split("/");
+  if (parts[0] !== "#" || parts[1] !== "components" || parts[2] !== "schemas") {
+    return undefined;
+  }
+
+  const schemaName = parts[3];
+  return schema.components?.schemas?.[schemaName];
+}
+
+/**
+ * Get type description from schema
+ */
+function getTypeDescription(schema: SchemaObject): string {
+  if (schema.type === "array" && schema.items) {
+    const itemType = schema.items.type || "object";
+    return `array[${itemType}]`;
+  }
+  if (schema.format) {
+    return `${schema.type}(${schema.format})`;
+  }
+  return schema.type || "object";
+}
+
+/**
+ * Format schema properties as markdown
+ */
+function formatSchemaProperties(
+  apiSchema: OpenAPISchema,
+  schema: SchemaObject,
+  indent: string = "",
+  maxDepth: number = 2,
+  currentDepth: number = 0
+): string {
+  if (currentDepth >= maxDepth) {
+    return "";
+  }
+
+  let result = "";
+  const properties = schema.properties || {};
+  const required = schema.required || [];
+
+  for (const [propName, propSchema] of Object.entries(properties)) {
+    const isRequired = required.includes(propName);
+    const requiredMark = isRequired ? " **(必須)**" : " (任意)";
+
+    // Resolve $ref if present
+    let resolvedSchema = propSchema;
+    if (propSchema.$ref) {
+      const resolved = resolveRef(apiSchema, propSchema.$ref);
+      if (resolved) {
+        resolvedSchema = resolved;
+      }
+    }
+
+    const typeDesc = getTypeDescription(resolvedSchema);
+    result += `${indent}- **${propName}**${requiredMark}: ${typeDesc}`;
+
+    if (resolvedSchema.description) {
+      result += ` - ${resolvedSchema.description}`;
+    }
+
+    // Add enum values
+    if (resolvedSchema.enum) {
+      result += ` (選択肢: ${resolvedSchema.enum.join(", ")})`;
+    }
+
+    // Add example
+    if (resolvedSchema.example !== undefined) {
+      const exampleStr =
+        typeof resolvedSchema.example === "string"
+          ? resolvedSchema.example
+          : JSON.stringify(resolvedSchema.example);
+      result += ` 例: \`${exampleStr}\``;
+    }
+
+    // Add constraints
+    const constraints: string[] = [];
+    if (resolvedSchema.minimum !== undefined) {
+      constraints.push(`最小: ${resolvedSchema.minimum}`);
+    }
+    if (resolvedSchema.maximum !== undefined) {
+      constraints.push(`最大: ${resolvedSchema.maximum}`);
+    }
+    if (resolvedSchema.pattern) {
+      constraints.push(`パターン: ${resolvedSchema.pattern}`);
+    }
+    if (constraints.length > 0) {
+      result += ` (${constraints.join(", ")})`;
+    }
+
+    result += "\n";
+
+    // Recursively format nested properties
+    if (resolvedSchema.properties && currentDepth < maxDepth - 1) {
+      result += formatSchemaProperties(
+        apiSchema,
+        resolvedSchema,
+        indent + "  ",
+        maxDepth,
+        currentDepth + 1
+      );
+    }
+
+    // Handle array items
+    if (
+      resolvedSchema.type === "array" &&
+      resolvedSchema.items &&
+      currentDepth < maxDepth - 1
+    ) {
+      let itemSchema = resolvedSchema.items;
+      if (itemSchema.$ref) {
+        const resolved = resolveRef(apiSchema, itemSchema.$ref);
+        if (resolved) {
+          itemSchema = resolved;
+        }
+      }
+      if (itemSchema.properties) {
+        result += `${indent}  配列の要素:\n`;
+        result += formatSchemaProperties(
+          apiSchema,
+          itemSchema,
+          indent + "    ",
+          maxDepth,
+          currentDepth + 1
+        );
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Format parameters as markdown
+ */
+function formatParameters(parameters: Parameter[]): string {
+  if (!parameters || parameters.length === 0) {
+    return "";
+  }
+
+  let result = "### パラメータ\n\n";
+  result += "| 名前 | 位置 | 必須 | 型 | 説明 |\n";
+  result += "|------|------|------|-----|------|\n";
+
+  for (const param of parameters) {
+    const name = param.name || "";
+    const location = param.in || "";
+    const required = param.required ? "はい" : "いいえ";
+    const type = param.schema ? getTypeDescription(param.schema) : "";
+    const description = param.schema?.description || param.description || "";
+
+    // Add enum values to description
+    let descWithEnum = description;
+    if (param.schema?.enum) {
+      descWithEnum += ` (選択肢: ${param.schema.enum.join(", ")})`;
+    }
+
+    result += `| ${name} | ${location} | ${required} | ${type} | ${descWithEnum} |\n`;
+  }
+
+  result += "\n";
+  return result;
+}
+
+/**
+ * Format request body as markdown
+ */
+function formatRequestBody(
+  apiSchema: OpenAPISchema,
+  requestBody: RequestBody
+): string {
+  if (!requestBody || !requestBody.content) {
+    return "";
+  }
+
+  let result = "### リクエストボディ\n\n";
+
+  // Get JSON schema (prefer application/json)
+  const jsonContent =
+    requestBody.content["application/json"] ||
+    requestBody.content["application/x-www-form-urlencoded"];
+
+  if (!jsonContent || !jsonContent.schema) {
+    return "";
+  }
+
+  let schema = jsonContent.schema;
+
+  // Resolve $ref if present
+  if (schema.$ref) {
+    const resolved = resolveRef(apiSchema, schema.$ref);
+    if (resolved) {
+      schema = resolved;
+    }
+  }
+
+  if (requestBody.required) {
+    result += "**(必須)**\n\n";
+  }
+
+  result += formatSchemaProperties(apiSchema, schema);
+  result += "\n";
+
+  return result;
+}
+
+/**
+ * Format success response as markdown
+ */
+function formatSuccessResponse(
+  apiSchema: OpenAPISchema,
+  responses: { [statusCode: string]: Response }
+): string {
+  if (!responses) {
+    return "";
+  }
+
+  // Find success response (200, 201, 204)
+  const successCodes = ["200", "201", "204"];
+  let successResponse: Response | undefined;
+  let statusCode: string | undefined;
+
+  for (const code of successCodes) {
+    if (responses[code]) {
+      successResponse = responses[code];
+      statusCode = code;
+      break;
+    }
+  }
+
+  if (!successResponse) {
+    return "";
+  }
+
+  let result = `### レスポンス (${statusCode})\n\n`;
+
+  if (successResponse.description) {
+    result += `${successResponse.description}\n\n`;
+  }
+
+  // Get JSON schema
+  const jsonContent = successResponse.content?.["application/json"];
+  if (!jsonContent || !jsonContent.schema) {
+    return result;
+  }
+
+  let schema = jsonContent.schema;
+
+  // Resolve $ref if present
+  if (schema.$ref) {
+    const resolved = resolveRef(apiSchema, schema.$ref);
+    if (resolved) {
+      schema = resolved;
+    }
+  }
+
+  result += formatSchemaProperties(apiSchema, schema);
+  result += "\n";
+
+  return result;
 }
 
 /**
@@ -76,6 +407,9 @@ function extractEndpointsByTag(
         operationId: operation.operationId,
         summary: operation.summary,
         description: operation.description,
+        parameters: operation.parameters,
+        requestBody: operation.requestBody,
+        responses: operation.responses,
       });
     }
 
@@ -109,7 +443,10 @@ async function generateReference(
   // Build endpoints markdown
   let endpointsMd = "";
   for (const { path, operations } of endpoints) {
-    for (const { method, summary, description } of operations) {
+    for (const operation of operations) {
+      const { method, summary, description, parameters, requestBody, responses } =
+        operation;
+
       endpointsMd += `### ${method} ${path}\n\n`;
       endpointsMd += `**操作**: ${summary || ""}\n\n`;
 
@@ -125,6 +462,21 @@ async function generateReference(
         if (cleanDesc) {
           endpointsMd += `**説明**: ${cleanDesc}\n\n`;
         }
+      }
+
+      // Add parameters
+      if (parameters && parameters.length > 0) {
+        endpointsMd += formatParameters(parameters);
+      }
+
+      // Add request body
+      if (requestBody) {
+        endpointsMd += formatRequestBody(schema, requestBody);
+      }
+
+      // Add response
+      if (responses) {
+        endpointsMd += formatSuccessResponse(schema, responses);
       }
     }
   }
